@@ -40,13 +40,11 @@ def build_bom_dict(df_spec):
         bom.setdefault(parent, []).append({'material': child, 'qty': child_qty, 'batch': parent_qty})
     return bom
 
-#  1. Полный взрыв BOM (суммирует потребность по всем веткам)
 def explode_bom(bom, product, qty, path="", visited=None):
     if visited is None: visited = set()
     if product in visited: return {}
     visited.add(product)
     
-    # Текущий узел требует qty
     reqs = {product: {'qty': qty, 'path': path}}
     
     if product in bom:
@@ -63,7 +61,7 @@ def explode_bom(bom, product, qty, path="", visited=None):
     return reqs
 
 st.sidebar.header("📂 Данные")
-specs_file = st.sidebar.file_uploader(" Спецификации", type=["xlsx"])
+specs_file = st.sidebar.file_uploader("📋 Спецификации", type=["xlsx"])
 stock_file = st.sidebar.file_uploader("📦 Остатки из 1С", type=["xlsx"])
 
 if specs_file and stock_file:
@@ -76,13 +74,14 @@ if specs_file and stock_file:
         
         target_product = st.sidebar.selectbox("📦 Продукт", products)
         target_qty = st.sidebar.number_input("📈 Планируемое кол-во", min_value=1, value=10)
+        
+        # ✅ ВЕРНУЛ ФИЛЬТР
+        show_only_deficit = st.sidebar.checkbox("🔴 Показывать только дефицит", value=True)
 
-        if st.sidebar.button(" Рассчитать MRP"):
+        if st.sidebar.button("🧮 Рассчитать MRP"):
             with st.spinner("Агрегирую потребность и сверяю со складом..."):
-                # Шаг 1: Собираем общую потребность
                 gross_needs = explode_bom(bom, target_product, target_qty)
                 
-                # Шаг 2: Неттинг (сравнение со складом)
                 results = []
                 for mat, data in gross_needs.items():
                     stock_row = df_stock[df_stock[COL_STOCK_NAME] == mat]
@@ -96,20 +95,27 @@ if specs_file and stock_file:
                         "Общая потребность": round(total_need, 3),
                         "Остаток на складе": stock_qty,
                         "Дефицит": round(deficit, 3),
-                        "Статус": "✅ Хватает" if deficit == 0 else " Закупить",
+                        "Статус": "✅ Хватает" if deficit == 0 else "🛒 Закупить",
                         "Где используется": data['path']
                     })
                 
                 df_res = pd.DataFrame(results)
-                # Сортируем: сначала дефицитные позиции
+                
+                # 🔴 ФИЛЬТРАЦИЯ
+                if show_only_deficit:
+                    df_res = df_res[df_res["Дефицит"] > 0]
+                
                 df_res = df_res.sort_values("Дефицит", ascending=False).reset_index(drop=True)
                 
-                st.subheader(f"📊 MRP-отчёт для {target_qty} ед. '{target_product}'")
-                st.dataframe(df_res, use_container_width=True, hide_index=True)
-                
-                df_res.to_excel("mrp_netting_result.xlsx", index=False)
-                with open("mrp_netting_result.xlsx", "rb") as f:
-                    st.download_button("📥 Скачать отчёт", f, file_name="mrp_netting_result.xlsx")
+                if df_res.empty:
+                    st.success(f"🎉 Для {target_qty} шт. '{target_product}' всех материалов достаточно!")
+                else:
+                    st.subheader(f"📊 MRP-отчёт для {target_qty} ед. '{target_product}'")
+                    st.dataframe(df_res, use_container_width=True, hide_index=True)
+                    
+                    df_res.to_excel("mrp_netting_result.xlsx", index=False)
+                    with open("mrp_netting_result.xlsx", "rb") as f:
+                        st.download_button("📥 Скачать отчёт", f, file_name="mrp_netting_result.xlsx")
     else:
         st.warning("Файл остатков пуст или не распознан.")
 else:
