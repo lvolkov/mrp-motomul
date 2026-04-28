@@ -119,7 +119,7 @@ if specs_file and stock_file:
                 with st.spinner("Считаю..."):
                     tree_data = calculate_mrp_cascade(bom, df_stock, target_product, target_qty, level=product_level)
                     
-                    if tree_
+                    if tree_data:
                         df_res = pd.DataFrame(tree_data)
                         
                         # Убираем дубликаты
