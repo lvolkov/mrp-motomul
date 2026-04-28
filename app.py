@@ -62,7 +62,7 @@ def calculate_mrp_cascade(bom, stock_df, product, gross_qty, path="", level=0, v
         "Валовая_потребность": round(gross_qty, 2),
         "Остаток": stock_qty,
         "Дефицит_нетто": round(net_req, 2),
-        "Действие": "🔨 Собрать" if is_assembly else "🛒 Закупить",
+        "Действие": "🔨 Собрать" if is_assembly else " Закупить",
         "Статус": "✅ OK" if net_req == 0 else "❌ Дефицит"
     }]
 
@@ -75,7 +75,7 @@ def calculate_mrp_cascade(bom, stock_df, product, gross_qty, path="", level=0, v
     return rows
 
 st.sidebar.header("📂 Данные")
-specs_file = st.sidebar.file_uploader("📋 Спецификации", type=["xlsx"])
+specs_file = st.sidebar.file_uploader(" Спецификации", type=["xlsx"])
 stock_file = st.sidebar.file_uploader("📦 Остатки из 1С", type=["xlsx"])
 
 if specs_file and stock_file:
@@ -90,9 +90,11 @@ if specs_file and stock_file:
         target_qty = st.sidebar.number_input("📈 Планируемое кол-во", min_value=1, value=10)
         show_only_deficit = st.sidebar.checkbox("🔴 Показывать только дефицит", value=True)
         
-        # 🔥 НОВАЯ НАСТРОЙКА: Агрегация
         aggregation_mode = st.sidebar.radio("Режим отображения", 
                                             ["📊 Агрегировать по материалам", "🌳 Показать дерево"])
+        
+        # 🔽 НОВЫЙ ФИЛЬТР ПО УРОВНЮ
+        level_filter = st.sidebar.selectbox("🔢 Фильтр по уровню", ["Все", "0", "1", "2", "3", "4", "5", "6"])
 
         if st.sidebar.button("🧮 Рассчитать"):
             with st.spinner("Считаю..."):
@@ -101,27 +103,34 @@ if specs_file and stock_file:
                 if tree_data:
                     df_res = pd.DataFrame(tree_data)
                     
-                    # 🔥 АГРЕГАЦИЯ: Группируем по материалу
+                    # Убираем дубликаты
+                    df_res = df_res.groupby(["Уровень", "Путь", "Материал"]).agg({
+                        "Валовая_потребность": "sum",
+                        "Остаток": "first",
+                        "Дефицит_нетто": "sum",
+                        "Действие": "first",
+                        "Статус": lambda x: "❌ Дефицит" if any(s == "❌ Дефицит" for s in x) else "✅ OK"
+                    }).reset_index()
+                    
+                    # Агрегация
                     if "Агрегировать" in aggregation_mode:
-                        agg_dict = {
+                        df_res = df_res.groupby("Материал").agg({
                             "Валовая_потребность": "sum",
-                            "Остаток": "first",  # Берём первый найденный остаток
+                            "Остаток": "first",
                             "Дефицит_нетто": "sum",
                             "Действие": "first",
-                            "Статус": lambda x: "❌ Дефицит" if any(s == "❌ Дефицит" for s in x) else "✅ OK"
-                        }
-                        
-                        # Для пути показываем все варианты использования
-                        def show_all_paths(paths):
-                            unique_paths = list(set(paths))
-                            return unique_paths[0] if len(unique_paths) == 1 else f"{len(unique_paths)} мест использования"
-                        
-                        agg_dict["Путь"] = show_all_paths
-                        agg_dict["Уровень"] = "min"
-                        
-                        df_res = df_res.groupby("Материал").agg(agg_dict).reset_index()
+                            "Статус": lambda x: "❌ Дефицит" if any(s == "❌ Дефицит" for s in x) else "✅ OK",
+                            "Путь": lambda x: f"{len(x)} мест использования" if len(x) > 1 else x.iloc[0],
+                            "Уровень": "min"
+                        }).reset_index()
                         df_res = df_res.sort_values("Дефицит_нетто", ascending=False)
+                    else:
+                        df_res = df_res.sort_values(["Уровень", "Путь"]).reset_index(drop=True)
+                        # Применяем фильтр уровня
+                        if level_filter != "Все":
+                            df_res = df_res[df_res["Уровень"] == int(level_filter)]
                     
+                    # Фильтр дефицита
                     if show_only_deficit:
                         df_res = df_res[df_res["Дефицит_нетто"] > 0]
                         
@@ -134,6 +143,8 @@ if specs_file and stock_file:
                         df_res.to_excel("mrp_result.xlsx", index=False)
                         with open("mrp_result.xlsx", "rb") as f:
                             st.download_button("📥 Скачать", f, file_name="mrp_result.xlsx")
+                else:
+                    st.error("❌ Ошибка: нет данных для расчёта")
     else:
         st.warning("Файл остатков пуст.")
 else:
